@@ -1,0 +1,192 @@
+//----------------------------------------------------------------------------------//
+//                             PROJETO INTEGRADOR                                   //
+//                    IFB CEILANDIA "AUTOMAÇÃO RESIDENCIAL*                         //
+//                                                                                  //
+//  ELANDIO, DANIELE, JOAO, LUCIAN                               16x2   i2c         //
+//----------------------------------------------------------------------------------//
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+// Configurações do LCD I2C
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+// Pinos dos botões
+const int buttonPlus = 2;  // Botão "+"
+const int buttonMinus = 3; // Botão "-"
+const int buttonMode = 4;  // Botão "M"
+
+// Pinos dos relés
+const int relay1 = 8;
+const int relay2 = 9;
+
+// Pino do sensor de corrente (saída do LM358)
+const int currentSensorPin = A0;
+
+// Variáveis para ajuste de corrente e potência
+float currentLimit = 20.0;   // Corrente inicial em A
+float powerLimit = 440.0;    // Potência inicial em W
+int displayState = 0;        // Estado do display
+unsigned long lastButtonPress = 0; // Última vez que um botão foi pressionado
+
+void setup() {
+  lcd.begin(16, 2);
+  lcd.init();
+  lcd.backlight();
+
+  // Configura os botões como entrada
+  pinMode(buttonPlus, INPUT);
+  pinMode(buttonMinus, INPUT);
+  pinMode(buttonMode, INPUT);
+
+  // Configura os relés como saída
+  pinMode(relay1, OUTPUT);
+  pinMode(relay2, OUTPUT);
+
+  // Inicia com os relés desligados
+  digitalWrite(relay1, LOW);
+  digitalWrite(relay2, LOW);
+
+  // Mensagem de inicialização
+  displayStartSequence();
+}
+
+void loop() {
+  // Atualiza o display conforme o estado
+  switch (displayState) {
+    case 0:
+      displayMonitoring();  // Estado principal de monitoramento
+      break;
+    case 1:
+      adjustCurrentLimit(); // Ajustar limite de corrente
+      break;
+    case 2:
+      adjustPowerLimit();   // Ajustar limite de potência
+      break;
+  }
+
+  // Verifica se o tempo sem pressionar botões excede 5 segundos
+  if (millis() - lastButtonPress > 5000 && displayState != 0) {
+    displayState = 0;
+  }
+}
+
+// Função para mostrar a sequência de inicialização
+void displayStartSequence() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("IFB CEILANDIA");
+  delay(1500);
+  lcd.clear();
+  lcd.print("PROJ INTEGRADOR");
+  lcd.setCursor(0, 1);
+  lcd.print("TEB1");
+  delay(1500);
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("ELANDIO");
+  lcd.setCursor(0, 1);
+  lcd.print("DANIELA");
+  delay(1500);
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("JOAO");
+  lcd.setCursor(0, 1);
+  lcd.print("LUCIAN OLIVEIRA");
+  delay(1500);
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("AUTOMACAO");
+  lcd.setCursor(0, 1);
+  lcd.print("RESIDENCIAL");
+  delay(1500);
+  lcd.clear();
+}
+
+// Função para exibir a tela de monitoramento
+void displayMonitoring() {
+  float current = readCurrent();          // Leitura da corrente
+  float power = current * 220;            // Cálculo da potência (exemplo 220V)
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Monitorando");
+  lcd.setCursor(0, 1);
+  lcd.print("Consumo KWh ");
+  lcd.print(current, 2); // Mostra corrente lida
+
+  // Troca para o modo de ajuste ao pressionar o botão M
+  if (digitalRead(buttonMode) == HIGH) {
+    lastButtonPress = millis();
+    displayState = 1;  // Ir para ajuste de corrente
+  }
+}
+
+// Função para ajustar o limite de corrente
+void adjustCurrentLimit() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Limite de");
+  lcd.setCursor(0, 1);
+  lcd.print("Corrente ");
+  lcd.print(currentLimit, 1);
+  lcd.print("A");
+
+  // Ajusta a corrente com os botões + e -
+  if (digitalRead(buttonPlus) == HIGH && currentLimit < 95) {
+    currentLimit += 1;
+    lastButtonPress = millis();
+    delay(200);
+  } else if (digitalRead(buttonMinus) == HIGH && currentLimit > 2) {
+    currentLimit -= 1;
+    lastButtonPress = millis();
+    delay(200);
+  }
+
+  // Troca para o ajuste de potência ao pressionar M novamente
+  if (digitalRead(buttonMode) == HIGH) {
+    lastButtonPress = millis();
+    displayState = 2;
+  }
+}
+
+// Função para ajustar o limite de potência
+void adjustPowerLimit() {
+  powerLimit = currentLimit * 220; // Atualiza potência com base na corrente
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Limite de");
+  lcd.setCursor(0, 1);
+  if (powerLimit < 10000) {
+    lcd.print("Potencia ");
+    lcd.print(powerLimit, 0);
+    lcd.print(" W");
+  } else {
+    lcd.print("WATTS ");
+    lcd.print(powerLimit, 0);
+  }
+
+  // Ajusta o limite de potência com os botões
+  if (digitalRead(buttonPlus) == HIGH && currentLimit < 95) {
+    currentLimit += 1;
+    lastButtonPress = millis();
+    delay(200);
+  } else if (digitalRead(buttonMinus) == HIGH && currentLimit > 2) {
+    currentLimit -= 1;
+    lastButtonPress = millis();
+    delay(200);
+  }
+
+  // Volta ao monitoramento ao pressionar o botão M novamente
+  if (digitalRead(buttonMode) == HIGH) {
+    lastButtonPress = millis();
+    displayState = 0;
+  }
+}
+
+// Função para ler a corrente do sensor
+float readCurrent() {
+  int sensorValue = analogRead(currentSensorPin);
+  float voltage = (sensorValue / 1023.0) * 5.0; // Converte para tensão
+  float current = (voltage - 2.5) * 20;         // Ajusta a leitura conforme o sensor
+  return current < 0 ? 0 : current;             // Evita valores negativos
+}
